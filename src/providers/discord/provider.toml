@@ -1,0 +1,17 @@
+name = "discord"
+
+[style]
+display-name = "Discord"
+icon-url = ""
+background-color = "#5865f2"
+background-color-hover = "#707bf4"
+
+[env]
+client-id = "DISCORD_CLIENT_ID"
+client-secret = "DISCORD_CLIENT_SECRET"
+scopes = ["identify", "email"]
+
+[url]
+auth = "https://discord.com/api/oauth2/authorize"
+token = "https://discord.com/api/oauth2/token"
+callback = "DISCORD_CALLBACK_URL"

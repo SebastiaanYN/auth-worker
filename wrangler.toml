@@ -1,0 +1,15 @@
+name = "auth-worker"
+workers_dev = true
+
+main = "build/worker/shim.mjs"
+compatibility_date = "2022-01-20"
+
+[vars]
+DISCORD_CLIENT_ID = "1002725125013110864"
+DISCORD_CALLBACK_URL = "https://auth-worker.sebastiaanyn.workers.dev/oauth/discord/callback"
+
+GITHUB_CLIENT_ID = "ac7adca64565246feb17"
+GITHUB_CALLBACK_URL = "https://auth-worker.sebastiaanyn.workers.dev/oauth/github/callback"
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
