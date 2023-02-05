@@ -2,16 +2,9 @@ name = "github"
 
 [style]
 display-name = "GitHub"
-icon-url = ""
 background-color = "#24292e"
 background-color-hover = "#2f363c"
-
-[env]
-client-id = "GITHUB_CLIENT_ID"
-client-secret = "GITHUB_CLIENT_SECRET"
-scopes = ["user:email"]
 
 [url]
 auth = "https://github.com/login/oauth/authorize"
 token = "https://github.com/login/oauth/access_token"
-callback = "GITHUB_CALLBACK_URL"

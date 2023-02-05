@@ -1,6 +1,6 @@
 [package]
 name = "auth-worker"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2021"
 
 [lib]
@@ -18,8 +18,8 @@ cfg-if = "0.1.2"
 worker = "0.0.10"
 wasm-bindgen = "0.2.82"
 
-serde = { version = "1.0.140", features = ["derive"] }
-serde_json = "1.0.82"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 oauth2 = { version = "4.2.3", default-features = false }
 
@@ -30,5 +30,5 @@ oauth2 = { version = "4.2.3", default-features = false }
 console_error_panic_hook = { version = "0.1.1", optional = true }
 
 [build-dependencies]
-serde = { version = "1.0.140", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
 toml = "0.5.9"

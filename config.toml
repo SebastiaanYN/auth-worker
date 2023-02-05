@@ -1,0 +1,5 @@
+domain = "https://auth.cf.sebastiaanyn.me"
+
+[providers]
+discord = ["identify", "email"]
+github = ["user:email"]

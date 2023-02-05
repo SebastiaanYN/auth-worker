@@ -21,14 +21,24 @@ fn log_request(req: &Request) {
     );
 }
 
-fn oauth_client(provider: &str, ctx: &RouteContext<()>) -> Result<OAuth> {
-    let provider = providers::get_oauth_options(provider, ctx)?;
+fn oauth_client(name: &str, ctx: &RouteContext<()>) -> Result<OAuth> {
+    let provider = providers::get_provider(name)?;
 
-    Ok(OAuth::new(provider))
+    let client_id = ctx
+        .var(&format!("{}_CLIENT_ID", name.to_uppercase()))
+        .expect("provider client id not set")
+        .to_string();
+
+    let client_secret = ctx
+        .var(&format!("{}_CLIENT_SECRET", name.to_uppercase()))
+        .expect("provider client secret not set")
+        .to_string();
+
+    Ok(OAuth::new(client_id, client_secret, provider))
 }
 
-fn handle_oauth(provider: &str, ctx: &RouteContext<()>) -> Result<Response> {
-    oauth_client(provider, &ctx)?.auth_grant()
+fn handle_oauth_grant(name: &str, ctx: &RouteContext<()>) -> Result<Response> {
+    oauth_client(name, ctx)?.auth_grant()
 }
 
 async fn handle_oauth_callback(
@@ -36,7 +46,7 @@ async fn handle_oauth_callback(
     req: &Request,
     ctx: &RouteContext<()>,
 ) -> Result<Response> {
-    let res = oauth_client(provider, &ctx)?.exchange_code(&req).await?;
+    let res = oauth_client(provider, ctx)?.exchange_code(&req).await?;
 
     providers::fetch_user(provider, res.access_token().secret())
         .await
@@ -48,7 +58,7 @@ async fn handle_oauth_refresh(
     req: &Request,
     ctx: &RouteContext<()>,
 ) -> Result<Response> {
-    oauth_client(provider, &ctx)?
+    oauth_client(provider, ctx)?
         .exchange_refresh_token(&req)
         .await
         .and_then(|res| Response::from_json(&res).map_err(|_| Error::InternalError))
@@ -61,11 +71,11 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> worker::Resu
 
     Router::new()
         .get("/login", |_, _| {
-            Response::from_html(include_str!("../public/login.html"))
+            Response::from_html(include_str!(concat!(env!("OUT_DIR"), "/login.html")))
         })
         .get("/oauth/:provider", |_, ctx| {
             if let Some(provider) = ctx.param("provider") {
-                handle_oauth(provider, &ctx).or_else(Into::into)
+                handle_oauth_grant(provider, &ctx).or_else(Into::into)
             } else {
                 Response::empty()
             }
