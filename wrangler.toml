@@ -2,7 +2,12 @@ name = "auth-worker"
 workers_dev = true
 
 main = "build/worker/shim.mjs"
-compatibility_date = "2022-01-20"
+compatibility_date = "2023-02-05"
 
 [build]
 command = "cargo install -q worker-build && worker-build --release"
+
+[[ d1_databases ]]
+binding = "DB"
+database_name = "auth-worker"
+database_id = "44380cfb-9906-48d0-9ecc-66ab887b38a9"

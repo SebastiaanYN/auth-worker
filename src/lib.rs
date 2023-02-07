@@ -1,10 +1,12 @@
 use oauth2::TokenResponse;
 use worker::*;
 
+mod d1;
 mod error;
 mod fetch;
 mod oauth;
 mod providers;
+mod sql;
 mod user;
 mod utils;
 
@@ -47,10 +49,14 @@ async fn handle_oauth_callback(
     ctx: &RouteContext<()>,
 ) -> Result<Response> {
     let res = oauth_client(provider, ctx)?.exchange_code(&req).await?;
+    let user = providers::fetch_user(provider, res.access_token().secret()).await?;
 
-    providers::fetch_user(provider, res.access_token().secret())
+    let db = d1::binding(&ctx.env, "DB").map_err(|_| Error::InternalError)?;
+    sql::upsert_user(provider, &db, &user)
         .await
-        .and_then(|user| Response::from_json(&user).map_err(|_| Error::InternalError))
+        .map_err(|_| Error::InternalError)?;
+
+    Response::from_json(&user).map_err(|_| Error::InternalError)
 }
 
 async fn handle_oauth_refresh(

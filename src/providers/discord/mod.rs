@@ -33,6 +33,6 @@ pub async fn fetch_user(access_token: &str) -> Result<User> {
         }),
         email: discord.email,
         email_verified: discord.verified,
-        ..User::default_with_user_id(discord.id)
+        ..User::default_with_id(discord.id)
     })
 }

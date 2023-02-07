@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct User {
-    pub user_id: String,
+    pub id: String,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
@@ -51,9 +51,9 @@ pub struct User {
 }
 
 impl User {
-    pub fn default_with_user_id(user_id: String) -> Self {
+    pub fn default_with_id(id: String) -> Self {
         Self {
-            user_id,
+            id,
 
             email: None,
             email_verified: None,
