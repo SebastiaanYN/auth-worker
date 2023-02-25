@@ -4,8 +4,12 @@ workers_dev = true
 main = "build/worker/shim.mjs"
 compatibility_date = "2023-02-05"
 
+kv_namespaces = [
+    { binding = "KV", id = "0b7880237f9245808127c672c71c12c0" }
+]
+
 [build]
-command = "cargo install -q worker-build && worker-build --release"
+command = "cargo install worker-build && worker-build --release"
 
 [[ d1_databases ]]
 binding = "DB"

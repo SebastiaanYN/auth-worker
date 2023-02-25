@@ -1,5 +1,15 @@
 -- Migration number: 0000 	 2023-02-07T23:16:26.462Z
 
+CREATE TABLE IF NOT EXISTS applications (
+    client_id TEXT PRIMARY KEY,
+    client_secret TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    redirect_uri TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS applications_name ON applications(name);
+
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
 

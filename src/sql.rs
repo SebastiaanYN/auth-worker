@@ -1,10 +1,6 @@
 use crate::{d1, user};
 
-pub async fn upsert_user(
-    provider: &str,
-    db: &d1::Database,
-    user: &user::User,
-) -> worker::Result<d1::QueryResult> {
+pub async fn upsert_user(db: &d1::Database, user: &user::User) -> worker::Result<d1::QueryResult> {
     d1::query!(
         db,
         r#"
@@ -51,7 +47,7 @@ ON CONFLICT DO UPDATE SET
     phone_number = excluded.phone_number,
     phone_verified = excluded.phone_verified
         "#,
-        format!("{provider}|{}", user.id),
+        user.id,
         user.email,
         user.email_verified.map(u8::from),
         user.family_name,

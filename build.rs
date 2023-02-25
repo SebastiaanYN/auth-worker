@@ -6,6 +6,7 @@ use std::{collections::HashMap, env, fs, path::Path};
 #[serde(rename_all(deserialize = "kebab-case"))]
 struct Config {
     domain: String,
+    client_id: String,
     providers: HashMap<String, Vec<String>>,
 }
 
@@ -115,10 +116,14 @@ pub fn get_provider(provider: &str) -> Result<Provider> {{
 }}
 
 pub async fn fetch_user(provider: &str, access_token: &str) -> Result<User> {{
-    match provider {{
+    let mut user = match provider {{
         {fetch_match_arms}
         _ => Err(Error::InvalidProvider),
-    }}
+    }}?;
+
+    user.id = format!("{{provider}}|{{}}", user.id);
+
+    Ok(user)
 }}
         "#
     )
@@ -183,6 +188,9 @@ fn main() {
 
     let config =
         toml::from_str::<Config>(include_str!("config.toml")).expect("failed to parse config");
+
+    println!("cargo:rustc-env=DOMAIN={}", config.domain);
+    println!("cargo:rustc-env=CLIENT_ID={}", config.client_id);
 
     let mut providers = providers()
         .into_iter()

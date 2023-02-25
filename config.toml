@@ -1,4 +1,5 @@
 domain = "https://auth.cf.sebastiaanyn.me"
+client-id = "e0df749f-39c8-4b1f-8ceb-1831042a7cf5"
 
 [providers]
 discord = ["identify", "email"]
