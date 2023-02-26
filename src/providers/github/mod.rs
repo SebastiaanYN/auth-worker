@@ -1,6 +1,7 @@
+use reqwest::{header, Client};
 use serde::Deserialize;
 
-use crate::{error::Result, fetch, user::User};
+use crate::{error::Error, users::User};
 
 #[derive(Deserialize)]
 struct GitHub {
@@ -22,22 +23,18 @@ struct Email {
 
 const API: &str = "https://api.github.com";
 
-pub async fn fetch_user(access_token: &str) -> Result<User> {
-    let mut headers = worker::Headers::new();
-    headers
-        .set("Authorization", &format!("token {access_token}"))
-        .unwrap();
-    headers.set("User-Agent", "auth.worker").unwrap();
-
-    let github = fetch::RequestBuilder::get(&format!("{API}/user"))
-        .set_headers(headers.clone())
+pub async fn fetch_user(client: Client, access_token: &str) -> Result<User, Error> {
+    let github = client
+        .get(&format!("{API}/user"))
+        .header(header::AUTHORIZATION, format!("token {}", access_token))
         .send()
         .await?
         .json::<GitHub>()
         .await?;
 
-    let emails = fetch::RequestBuilder::get(&format!("{API}/user/emails"))
-        .set_headers(headers)
+    let emails = client
+        .get(&format!("{API}/user/emails"))
+        .header(header::AUTHORIZATION, format!("token {}", access_token))
         .send()
         .await?
         .json::<Vec<Email>>()

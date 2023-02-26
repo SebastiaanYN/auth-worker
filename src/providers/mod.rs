@@ -1,7 +1,4 @@
-use crate::{
-    error::{Error, Result},
-    user::User,
-};
+use crate::{error::Error, users::User};
 
 mod discord;
 mod github;

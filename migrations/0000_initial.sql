@@ -5,7 +5,8 @@ CREATE TABLE IF NOT EXISTS applications (
     client_secret TEXT NOT NULL,
     name TEXT NOT NULL,
     description TEXT,
-    redirect_uri TEXT NOT NULL
+    redirect_uri TEXT NOT NULL,
+    scopes TEXT NOT NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS applications_name ON applications(name);

@@ -5,7 +5,7 @@ main = "build/worker/shim.mjs"
 compatibility_date = "2023-02-05"
 
 kv_namespaces = [
-    { binding = "KV", id = "0b7880237f9245808127c672c71c12c0" }
+    { binding = "KV", id = "0b7880237f9245808127c672c71c12c0", preview_id = "0b7880237f9245808127c672c71c12c0" }
 ]
 
 [build]
@@ -15,3 +15,4 @@ command = "cargo install worker-build && worker-build --release"
 binding = "DB"
 database_name = "auth-worker"
 database_id = "44380cfb-9906-48d0-9ecc-66ab887b38a9"
+preview_database_id = "44380cfb-9906-48d0-9ecc-66ab887b38a9"

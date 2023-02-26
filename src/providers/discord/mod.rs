@@ -1,6 +1,7 @@
+use reqwest::Client;
 use serde::Deserialize;
 
-use crate::{error::Result, fetch, user::User};
+use crate::{error::Error, users::User};
 
 #[derive(Deserialize)]
 struct Discord {
@@ -11,9 +12,10 @@ struct Discord {
     email: Option<String>,
 }
 
-pub async fn fetch_user(access_token: &str) -> Result<User> {
-    let discord = fetch::RequestBuilder::get("https://discord.com/api/users/@me")
-        .set_header("Authorization", &format!("Bearer {access_token}"))?
+pub async fn fetch_user(client: Client, access_token: &str) -> Result<User, Error> {
+    let discord = client
+        .get("https://discord.com/api/users/@me")
+        .bearer_auth(access_token)
         .send()
         .await?
         .json::<Discord>()

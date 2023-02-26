@@ -217,6 +217,12 @@
     </div>
 
     <script>
+      function oauth(connection) {
+        let redirect = new URL(location.href);
+        redirect.searchParams.append("connection", connection);
+        location.href = redirect.toString();
+      }
+
       function passwordAuth() {
         const email = document.getElementById("email").value;
         const password = document.getElementById("password").value;

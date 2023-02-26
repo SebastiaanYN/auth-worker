@@ -261,6 +261,7 @@ impl From<sys::PreparedStatement> for PreparedStatement {
 }
 
 // The result of a D1 query execution.
+#[derive(Debug)]
 pub struct QueryResult(sys::QueryResult);
 
 impl QueryResult {

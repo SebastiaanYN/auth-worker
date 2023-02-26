@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+mod upsert;
+
+pub use upsert::upsert_user;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct User {
     pub id: String,

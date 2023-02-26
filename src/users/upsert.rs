@@ -1,6 +1,6 @@
-use crate::{d1, user};
+use crate::{d1, users::User};
 
-pub async fn upsert_user(db: &d1::Database, user: &user::User) -> worker::Result<d1::QueryResult> {
+pub async fn upsert_user(db: &d1::Database, user: &User) -> worker::Result<d1::QueryResult> {
     d1::query!(
         db,
         r#"

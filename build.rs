@@ -79,7 +79,7 @@ fn gen_provider_def(config: &Config, provider: &ProviderConfig) -> String {
 const {name_upper}: Provider = Provider {{
     auth_url: "{auth}",
     token_url: "{token}",
-    callback_url: "{domain}/oauth/{name}/callback",
+    callback_url: "{domain}/oauth/callback",
     scopes: &[{scopes}],
 }};
         "#
@@ -102,23 +102,23 @@ fn gen_provider_fns(providers: &[ProviderConfig]) -> String {
         .map(|provider| {
             let ProviderConfig { name, .. } = provider;
 
-            format!(r#""{name}" => {name}::fetch_user(access_token).await,"#)
+            format!(r#""{name}" => {name}::fetch_user(client, access_token).await,"#)
         })
         .collect::<String>();
 
     format!(
         r#"
-pub fn get_provider(provider: &str) -> Result<Provider> {{
+pub fn get_provider(provider: &str) -> Result<Provider, Error> {{
     match provider {{
         {get_match_arms}
-        _ => Err(Error::InvalidProvider),
+        _ => Err(Error::InvalidConnection),
     }}
 }}
 
-pub async fn fetch_user(provider: &str, access_token: &str) -> Result<User> {{
+pub async fn fetch_user(provider: &str, client: ::reqwest::Client, access_token: &str) -> Result<User, Error> {{
     let mut user = match provider {{
         {fetch_match_arms}
-        _ => Err(Error::InvalidProvider),
+        _ => Err(Error::InvalidConnection),
     }}?;
 
     user.id = format!("{{provider}}|{{}}", user.id);
@@ -157,7 +157,7 @@ fn gen_provider_button(provider: &ProviderConfig) -> String {
         r#"
 <button
     class="oauth-provider"
-    onclick="location.href='/oauth/{name}'"
+    onclick="oauth('{name}')"
     style="--provider-bg-color: {background_color}; --provider-bg-color-hover: {background_color_hover}"
 >
     <div class="oauth-icon">

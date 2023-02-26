@@ -1,243 +1,145 @@
-use application::CreateApplication;
-use rand::distributions::DistString;
-use serde::Deserialize;
-use worker::*;
+use std::sync::Arc;
 
-mod application;
+use axum::{
+    extract::State,
+    headers::{authorization::Bearer, Authorization},
+    http::{HeaderMap, Request, Response},
+    response::IntoResponse,
+    routing::{get, post},
+    Json, Router, TypedHeader,
+};
+use futures::channel::oneshot;
+use oauth2::Scope;
+use rand::{
+    distributions::{Alphanumeric, DistString},
+    thread_rng,
+};
+use reqwest::header;
+use tower::Service;
+use worker::{body::Body, event, kv::KvStore, Context, Env, Result};
+
+mod applications;
 mod d1;
 mod error;
-mod fetch;
 mod oauth;
 mod providers;
-mod sql;
 mod tokens;
-mod user;
-mod utils;
+mod users;
 
-use error::{Error, Result};
-use oauth::OAuth;
+use error::Error;
+use oauth::states::TokenMetadata;
 
-fn log_request(req: &Request) {
-    console_log!(
-        "{} - [{}], located at: {:?}, within: {}",
-        Date::now().to_string(),
-        req.path(),
-        req.cf().coordinates().unwrap_or_default(),
-        req.cf().region().unwrap_or("unknown region".into())
+pub fn gen_string(len: usize) -> String {
+    Alphanumeric.sample_string(&mut thread_rng(), len)
+}
+
+pub fn http_client() -> reqwest::Client {
+    let mut headers = HeaderMap::new();
+    headers.append(
+        header::USER_AGENT,
+        format!(
+            "auth-worker v{} ({})",
+            env!("CARGO_PKG_VERSION"),
+            env!("DOMAIN"),
+        )
+        .parse()
+        .unwrap(),
     );
+
+    reqwest::ClientBuilder::new()
+        .default_headers(headers)
+        .build()
+        .unwrap()
 }
 
-fn oauth_client(name: &str, ctx: &RouteContext<()>) -> Result<OAuth> {
-    let provider = providers::get_provider(name)?;
-
-    let client_id = ctx
-        .var(&format!("{}_CLIENT_ID", name.to_uppercase()))
-        .expect("provider client ID not set")
-        .to_string();
-
-    let client_secret = ctx
-        .var(&format!("{}_CLIENT_SECRET", name.to_uppercase()))
-        .expect("provider client secret not set")
-        .to_string();
-
-    Ok(OAuth::new(client_id, client_secret, provider))
+#[derive(Clone)]
+pub struct AppState {
+    env: Arc<Env>,
+    db: Arc<d1::Database>,
+    kv: Arc<KvStore>,
 }
 
-fn handle_oauth_grant(name: &str, ctx: &RouteContext<()>) -> Result<Response> {
-    oauth_client(name, ctx)?.auth_grant()
+unsafe impl Send for AppState {}
+unsafe impl Sync for AppState {}
+
+async fn application(
+    State(state): State<AppState>,
+    Json(mut req): Json<applications::CreateApplication>,
+) -> impl IntoResponse {
+    let (tx, rx) = oneshot::channel();
+    wasm_bindgen_futures::spawn_local(async move {
+        let res = applications::create_application(&state.db, &mut req).await;
+        tx.send(res).unwrap();
+    });
+    Json(rx.await.unwrap())
 }
 
-async fn handle_oauth_callback(
-    provider: &str,
-    req: &Request,
-    ctx: &RouteContext<()>,
-) -> Result<Response> {
-    use oauth2::TokenResponse;
+async fn users_impl(state: AppState, authorization: Authorization<Bearer>) -> impl IntoResponse {
+    let token = authorization.token();
 
-    let res = oauth_client(provider, ctx)?.exchange_code(&req).await?;
-    let user = providers::fetch_user(provider, res.access_token().secret()).await?;
-
-    let db = d1::binding(&ctx.env, "DB").expect("DB does not exist");
-    sql::upsert_user(&db, &user)
+    let token_meta = state
+        .kv
+        .get(&format!("token:access:{}", token))
+        .json::<TokenMetadata>()
         .await
-        .map_err(|_| Error::InternalError)?;
+        .map_err(Error::Kv)?
+        .ok_or(Error::InvalidAccessToken)?;
 
-    let rsa_priv_pem = ctx
-        .var("PRIV_KEY")
-        .expect("RSA private key not set")
-        .to_string();
-    let id_token =
-        tokens::id_token(user.clone(), &rsa_priv_pem, res.access_token()).map_err(|e| {
-            console_error!("{e}");
-            Error::InternalError
-        })?;
+    if !token_meta
+        .scopes
+        .contains(&Scope::new("read:user_idp_tokens".to_string()))
+    {
+        return Err(Error::MissingPermission);
+    }
 
-    let mut reply = openidconnect::core::CoreTokenResponse::new(
-        res.access_token().clone(),
-        res.token_type().clone(),
-        openidconnect::core::CoreIdTokenFields::new(
-            Some(id_token),
-            oauth2::EmptyExtraTokenFields {},
-        ),
-    );
-    reply.set_refresh_token(res.refresh_token().cloned());
-    reply.set_expires_in(res.expires_in().as_ref());
-    reply.set_scopes(res.scopes().cloned());
-
-    let code = rand::distributions::Alphanumeric.sample_string(&mut rand::rngs::OsRng, 16);
-
-    let kv = ctx.kv("KV").expect("KV does not exist");
-    kv.put(&code, &reply)
-        .map_err(|e| {
-            console_error!("{e}");
-            Error::InternalError
-        })?
-        .expiration_ttl(60)
-        .execute()
+    let tokens = state
+        .kv
+        .get(&format!("connection:{}:tokens", token_meta.client_id))
+        .json()
         .await
-        .map_err(|e| {
-            console_error!("{e}");
-            Error::InternalError
-        })?;
+        .map_err(Error::Kv)?
+        .ok_or(Error::TokensNotFound)?;
 
-    Response::from_json(&code).map_err(|e| {
-        console_error!("{e}");
-        Error::InternalError
-    })
+    Ok(Json(tokens))
 }
 
-async fn handle_oauth_refresh(
-    provider: &str,
-    req: &Request,
-    ctx: &RouteContext<()>,
-) -> Result<Response> {
-    oauth_client(provider, ctx)?
-        .exchange_refresh_token(&req)
-        .await
-        .and_then(|res| Response::from_json(&res).map_err(|_| Error::InternalError))
+async fn users(
+    State(state): State<AppState>,
+    TypedHeader(req): TypedHeader<Authorization<Bearer>>,
+) -> impl IntoResponse {
+    let (tx, rx) = oneshot::channel();
+    wasm_bindgen_futures::spawn_local(async move {
+        let res = users_impl(state, req).await;
+        tx.send(res).map_err(|_| ()).unwrap()
+    });
+    rx.await.unwrap()
+}
+
+async fn jwks(State(state): State<AppState>) -> impl IntoResponse {
+    Json(tokens::create_jwks(&state))
+}
+
+fn router() -> Router<AppState, Body> {
+    Router::new()
+        .route("/application", post(application))
+        .route("/users", get(users))
+        .route("/.well-known/jwks.json", get(jwks))
+        .nest("/oauth", oauth::router())
 }
 
 #[event(fetch)]
-pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> worker::Result<Response> {
-    log_request(&req);
-    utils::set_panic_hook();
+async fn fetch(req: Request<Body>, env: Env, _ctx: Context) -> Result<Response<Body>> {
+    console_error_panic_hook::set_once();
 
-    Router::new()
-        .get("/login", |_, _| {
-            Response::from_html(include_str!(concat!(env!("OUT_DIR"), "/login.html")))
-        })
-        .post_async("/application", |mut req, ctx| async move {
-            let data = req.json::<CreateApplication>().await?;
-            let db = d1::binding(&ctx.env, "DB")?;
+    let env = Arc::new(env);
+    let db = Arc::new(d1::binding(&env, "DB").unwrap());
+    let kv = Arc::new(env.kv("KV").unwrap());
 
-            if let Some(res) = application::create_application(&db, &data).await {
-                Response::from_json(&res)
-            } else {
-                Response::empty()
-            }
-        })
-        .get("/oauth/:provider", |_, ctx| {
-            if let Some(provider) = ctx.param("provider") {
-                handle_oauth_grant(provider, &ctx).or_else(Into::into)
-            } else {
-                Response::empty()
-            }
-        })
-        .get_async("/oauth/:provider/callback", |req, ctx| async move {
-            if let Some(provider) = ctx.param("provider") {
-                handle_oauth_callback(provider, &req, &ctx)
-                    .await
-                    .or_else(Into::into)
-            } else {
-                Response::empty()
-            }
-        })
-        .get_async("/oauth/:provider/refresh", |req, ctx| async move {
-            if let Some(provider) = ctx.param("provider") {
-                handle_oauth_refresh(provider, &req, &ctx)
-                    .await
-                    .or_else(Into::into)
-            } else {
-                Response::empty()
-            }
-        })
-        .get_async("/oauth/authorize", |req, _| async move {
-            #[derive(Deserialize)]
-            struct AuthorizeRequest {
-                response_type: String,
-                client_id: String,
-                redirect_uri: String,
-                scope: Option<String>,
-                state: String,
-            }
-
-            let Ok(auth_req) = serde_urlencoded::from_str::<AuthorizeRequest>(&req.url()?.query().unwrap_or("")) else { return Response::empty() };
-
-            if auth_req.response_type != "code" {
-                return Response::empty();
-            }
-
-            // let url = Url::parse_with_params(&format!("{}/login", std::env!("DOMAIN")), [
-            //     ("response_type", auth_req.response_type),
-            //     ("client_id", auth_req.client_id),
-            //     ("redirect_uri", auth_req.redirect_uri),
-            //     ("scope", auth_req.scope.unwrap_or_else(String::new)),
-            //     ("state", auth_req.state),
-            // ])?;
-
-            Response::from_html(include_str!(concat!(env!("OUT_DIR"), "/login.html")))
-        })
-        .post_async("/oauth/token", |mut req, ctx| async move {
-            let valid_content_type = req
-                .headers()
-                .get("content-type")?
-                .map(|ty| ty == "application/x-www-form-urlencoded")
-                .unwrap_or(false);
-            if !valid_content_type {
-                return Response::empty();
-            }
-
-            #[derive(Deserialize)]
-            struct AccessTokenRequest {
-                grant_type: String,
-                client_id: String,
-                client_secret: String,
-                code: String,
-                redirect_uri: String,
-            }
-
-            let body = req.text().await?;
-            let Ok(token_req) = serde_urlencoded::from_str::<AccessTokenRequest>(&body) else { return Response::empty() };
-
-            if token_req.grant_type != "authorization_code" {
-                return Response::empty();
-            }
-
-            let db = d1::binding(&ctx.env, "DB").expect("DB does not exist");
-            if !application::verify_client_creds(&db, &token_req.client_id, &token_req.client_secret).await {
-                return Response::empty();
-            }
-
-            let kv = ctx.kv("KV").expect("KV does not exist");
-            let res = kv
-                .get(&token_req.code)
-                .json::<openidconnect::core::CoreTokenResponse>()
-                .await?;
-
-            if let Some(res) = res {
-                Response::from_json(&res)
-            } else {
-                Response::empty()
-            }
-        })
-        .get("/.well-known/jwks.json", |_, ctx| {
-            let rsa_priv_pem = ctx
-                .var("PRIV_KEY")
-                .expect("RSA private key not set")
-                .to_string();
-
-            Response::from_json(&tokens::create_jwks(&rsa_priv_pem))
-        })
-        .run(req, env)
+    let res = router()
+        .with_state(AppState { env, db, kv })
+        .call(req)
         .await
+        .unwrap();
+
+    Ok(res.map(Body::new))
 }

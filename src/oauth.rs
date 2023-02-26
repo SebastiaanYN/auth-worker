@@ -1,53 +1,42 @@
-use std::collections::HashMap;
-
+use axum::{
+    routing::{get, post},
+    Router,
+};
 use oauth2::{
     basic::{BasicClient, BasicErrorResponseType, BasicTokenType},
-    http::StatusCode,
-    AuthUrl, AuthorizationCode, Client, ClientId, ClientSecret, CsrfToken, EmptyExtraTokenFields,
-    RedirectUrl, RefreshToken, RequestTokenError, RevocationErrorResponseType, Scope,
-    StandardErrorResponse, StandardRevocableToken, StandardTokenIntrospectionResponse,
-    StandardTokenResponse, TokenUrl,
+    AuthUrl, Client, ClientId, ClientSecret, EmptyExtraTokenFields, RedirectUrl,
+    RevocationErrorResponseType, Scope, StandardErrorResponse, StandardRevocableToken,
+    StandardTokenIntrospectionResponse, StandardTokenResponse, TokenUrl,
 };
+use worker::{body::Body, Env};
 
 use crate::{
-    error::{Error, Result},
-    fetch,
-    providers::Provider,
+    error::Error,
+    providers::{self, Provider},
+    AppState,
 };
 
-pub type OAuthResponse = StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>;
+pub mod authorize;
+pub mod callback;
+pub mod refresh;
+pub mod states;
+pub mod token;
 
-pub type OAuthClient = Client<
+type OAuth2Client = Client<
     StandardErrorResponse<BasicErrorResponseType>,
-    OAuthResponse,
+    StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>,
     BasicTokenType,
     StandardTokenIntrospectionResponse<EmptyExtraTokenFields, BasicTokenType>,
     StandardRevocableToken,
     StandardErrorResponse<RevocationErrorResponseType>,
 >;
 
-async fn make_req(req: oauth2::HttpRequest) -> Result<oauth2::HttpResponse> {
-    // SAFETY: oauth2 should not provide an invalid utf8 string as a body
-    let body = unsafe { std::str::from_utf8_unchecked(&req.body) };
-
-    let mut res = fetch::RequestBuilder::new(req.method.to_string().into(), req.url.as_str())
-        .set_headers(req.headers.into())
-        .body(body)
-        .await?;
-
-    Ok::<_, Error>(oauth2::HttpResponse {
-        status_code: StatusCode::from_u16(res.status_code()).map_err(|_| Error::InternalError)?,
-        headers: res.headers().into(),
-        body: res.bytes().await?,
-    })
+pub struct OAuthClient {
+    pub client: OAuth2Client,
+    pub scopes: Vec<Scope>,
 }
 
-pub struct OAuth {
-    client: OAuthClient,
-    scopes: Vec<Scope>,
-}
-
-impl OAuth {
+impl OAuthClient {
     pub fn new(client_id: String, client_secret: String, provider: Provider) -> Self {
         let client = BasicClient::new(
             ClientId::new(client_id),
@@ -68,96 +57,28 @@ impl OAuth {
                 .collect(),
         }
     }
+}
 
-    /// Start the authorization grant flow. Generates a [`worker::Response`] that redirects to the authorization URL.
-    pub fn auth_grant(&self) -> Result<worker::Response> {
-        let (auth_url, csrf_token) = self
-            .client
-            .authorize_url(CsrfToken::new_random)
-            .add_scope(Scope::new("identify".to_string()))
-            .add_scopes(self.scopes.clone())
-            .url();
+fn get_oauth_client(name: &str, env: &Env) -> Result<OAuthClient, Error> {
+    let provider = providers::get_provider(name)?;
 
-        // `Response::empty` always returns `Ok`
-        let mut res = worker::Response::empty().unwrap().with_status(302);
+    let client_id = env
+        .var(&format!("{}_CLIENT_ID", name.to_uppercase()))
+        .expect("provider client ID not set")
+        .to_string();
 
-        res.headers_mut()
-            .set(
-                "Set-Cookie",
-                &format!("auth_state={}; HttpOnly; Secure", csrf_token.secret()),
-            )
-            .map_err(|_| Error::InternalError)?;
+    let client_secret = env
+        .var(&format!("{}_CLIENT_SECRET", name.to_uppercase()))
+        .expect("provider client secret not set")
+        .to_string();
 
-        res.headers_mut()
-            .set("Location", auth_url.as_str())
-            .map_err(|_| Error::InternalError)?;
+    Ok(OAuthClient::new(client_id, client_secret, provider))
+}
 
-        Ok(res)
-    }
-
-    fn validate_req_and_extract_code(req: &worker::Request) -> Result<AuthorizationCode> {
-        let url = req.url().map_err(|_| Error::InternalError)?;
-        let query = url.query_pairs().collect::<HashMap<_, _>>();
-
-        let code = query.get("code").ok_or(Error::InvalidRequest)?;
-        let state = query.get("state").ok_or(Error::InvalidRequest)?;
-
-        let cookies = req
-            .headers()
-            .get("Cookie")
-            .ok()
-            .flatten()
-            .ok_or(Error::InvalidRequest)?;
-
-        // Extract auth state from the cookies
-        let (_, cookie_state) = cookies
-            .split("; ")
-            .find(|cookie| cookie.starts_with("auth_state="))
-            .and_then(|cookie| cookie.split_once("="))
-            .ok_or(Error::InvalidRequest)?;
-
-        // Verify the auth state is correct
-        if state == cookie_state {
-            Ok(AuthorizationCode::new(code.to_string()))
-        } else {
-            Err(Error::InvalidAuthState)
-        }
-    }
-
-    /// Exchange authorization code for access and refresh tokens.
-    pub async fn exchange_code(&self, req: &worker::Request) -> Result<OAuthResponse> {
-        let code = OAuth::validate_req_and_extract_code(&req)?;
-
-        self.client
-            .exchange_code(code)
-            .request_async(make_req)
-            .await
-            .map_err(|err| match err {
-                RequestTokenError::Request(err) => err,
-                _ => Error::InternalError,
-            })
-    }
-
-    fn extract_refresh_token(req: &worker::Request) -> Result<RefreshToken> {
-        req.url()
-            .map_err(|_| Error::InvalidRequest)?
-            .query_pairs()
-            .find(|(name, _)| name == "refresh_token")
-            .map(|(_, refresh_token)| RefreshToken::new(refresh_token.to_string()))
-            .ok_or(Error::InvalidRequest)
-    }
-
-    /// Exchange refresh tokens for new access and refresh tokens.
-    pub async fn exchange_refresh_token(&self, req: &worker::Request) -> Result<OAuthResponse> {
-        let refresh_token = OAuth::extract_refresh_token(&req)?;
-
-        self.client
-            .exchange_refresh_token(&refresh_token)
-            .request_async(make_req)
-            .await
-            .map_err(|err| match err {
-                RequestTokenError::Request(err) => err,
-                _ => Error::InternalError,
-            })
-    }
+pub fn router() -> Router<AppState, Body> {
+    Router::new()
+        .route("/authorize", get(authorize::oauth_authorize))
+        .route("/callback", get(callback::oauth_callback))
+        .route("/token", post(token::oauth_token))
+        .route("/refresh", post(refresh::oauth_refresh))
 }
