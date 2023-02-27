@@ -23,6 +23,7 @@ pub enum Error {
     InvalidAccessToken,
     MissingPermission,
     TokensNotFound,
+    MissingKeys,
 }
 
 unsafe impl Send for Error {}
@@ -40,6 +41,7 @@ impl fmt::Display for Error {
             Self::InvalidAccessToken => write!(f, "invalid access token"),
             Self::MissingPermission => write!(f, "missing permission"),
             Self::TokensNotFound => write!(f, "tokens not found"),
+            Self::MissingKeys => write!(f, "internal error"),
         }
     }
 }
@@ -65,6 +67,7 @@ impl IntoResponse for Error {
             Self::InvalidAccessToken => (StatusCode::BAD_REQUEST, s).into_response(),
             Self::MissingPermission => (StatusCode::BAD_REQUEST, s).into_response(),
             Self::TokensNotFound => (StatusCode::NOT_FOUND, s).into_response(),
+            Self::MissingKeys => (StatusCode::INTERNAL_SERVER_ERROR, s).into_response(),
         }
     }
 }

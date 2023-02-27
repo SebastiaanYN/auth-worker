@@ -1,33 +1,22 @@
 use chrono::{Duration, Utc};
-use oauth2::{AccessToken, RefreshToken};
+use oauth2::{AccessToken, ClientId, RefreshToken};
 use openidconnect::{
-    core::{
-        CoreIdToken, CoreIdTokenClaims, CoreJsonWebKeySet, CoreJwsSigningAlgorithm,
-        CoreRsaPrivateSigningKey,
-    },
+    core::{CoreIdToken, CoreIdTokenClaims, CoreJwsSigningAlgorithm},
     Audience, EmptyAdditionalClaims, EndUserEmail, EndUserFamilyName, EndUserGivenName,
     EndUserName, EndUserNickname, EndUserPhoneNumber, EndUserPictureUrl, EndUserUsername,
-    IssuerUrl, JsonWebTokenError, PrivateSigningKey, StandardClaims, SubjectIdentifier,
+    IssuerUrl, StandardClaims, SubjectIdentifier,
 };
 
-use crate::{gen_string, users::User, AppState};
+use crate::{error::Error, gen_string, keys::get_rsa_key, users::User, AppState};
 
-fn rsa_priv_key(state: &AppState) -> CoreRsaPrivateSigningKey {
-    let rsa_priv_pem = state
-        .env
-        .var("PRIV_KEY")
-        .expect("RSA private key not set")
-        .to_string();
-
-    openidconnect::core::CoreRsaPrivateSigningKey::from_pem(&rsa_priv_pem, None)
-        .expect("invalid RSA private key")
-}
-
-pub fn id_token(
-    user: User,
+pub async fn id_token(
     state: &AppState,
+    client_id: &ClientId,
+    user: User,
     access_token: &AccessToken,
-) -> Result<CoreIdToken, JsonWebTokenError> {
+) -> Result<CoreIdToken, Error> {
+    let signing_key = get_rsa_key(state).await?.ok_or(Error::MissingKeys)?;
+
     let claims = StandardClaims::new(SubjectIdentifier::new(user.id))
         .set_email(user.email.map(EndUserEmail::new))
         .set_email_verified(user.email_verified)
@@ -47,38 +36,35 @@ pub fn id_token(
     let id_token = CoreIdToken::new(
         CoreIdTokenClaims::new(
             IssuerUrl::new(env!("DOMAIN").to_string()).expect("invalid issuer URL"),
-            vec![Audience::new(env!("CLIENT_ID").to_string())],
+            vec![Audience::new(client_id.to_string())],
             Utc::now() + Duration::seconds(36000),
             Utc::now(),
             claims,
             EmptyAdditionalClaims {},
         ),
-        &rsa_priv_key(state),
+        &signing_key,
         CoreJwsSigningAlgorithm::RsaSsaPkcs1V15Sha256,
         Some(access_token),
         None,
-    )?;
+    )
+    .map_err(Error::Jwt)?;
 
     Ok(id_token)
 }
 
-pub fn create_jwks(state: &AppState) -> CoreJsonWebKeySet {
-    openidconnect::core::CoreJsonWebKeySet::new(vec![rsa_priv_key(state).as_verification_key()])
-}
-
 pub struct AccessRefreshTokenSet {
     pub access_token: AccessToken,
-    pub expires_in: chrono::Duration,
+    pub expires_in: Duration,
     pub refresh_token: RefreshToken,
-    pub refresh_expires_in: chrono::Duration,
+    pub refresh_expires_in: Duration,
 }
 
 pub fn generate_access_refresh_token_set() -> AccessRefreshTokenSet {
     let access_token = AccessToken::new(gen_string(32));
-    let expires_in = chrono::Duration::weeks(1);
+    let expires_in = Duration::weeks(1);
 
     let refresh_token = RefreshToken::new(gen_string(64));
-    let refresh_expires_in = chrono::Duration::weeks(4);
+    let refresh_expires_in = Duration::weeks(4);
 
     AccessRefreshTokenSet {
         access_token,

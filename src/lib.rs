@@ -9,6 +9,7 @@ use axum::{
     Json, Router, TypedHeader,
 };
 use futures::channel::oneshot;
+use keys::{get_jwks, rotate_keys};
 use oauth2::Scope;
 use rand::{
     distributions::{Alphanumeric, DistString},
@@ -16,11 +17,12 @@ use rand::{
 };
 use reqwest::header;
 use tower::Service;
-use worker::{body::Body, event, kv::KvStore, Context, Env, Result};
+use worker::{body::Body, event, kv::KvStore, Context, Env, ScheduleContext, ScheduledEvent};
 
 mod applications;
 mod d1;
 mod error;
+mod keys;
 mod oauth;
 mod providers;
 mod tokens;
@@ -62,16 +64,28 @@ pub struct AppState {
 unsafe impl Send for AppState {}
 unsafe impl Sync for AppState {}
 
+impl AppState {
+    fn new(env: Env) -> Self {
+        let env = Arc::new(env);
+        let db = Arc::new(d1::binding(&env, "DB").unwrap());
+        let kv = Arc::new(env.kv("KV").unwrap());
+
+        AppState { env, db, kv }
+    }
+}
+
 async fn application(
     State(state): State<AppState>,
     Json(mut req): Json<applications::CreateApplication>,
 ) -> impl IntoResponse {
     let (tx, rx) = oneshot::channel();
+
     wasm_bindgen_futures::spawn_local(async move {
         let res = applications::create_application(&state.db, &mut req).await;
-        tx.send(res).unwrap();
+        tx.send(Json(res)).unwrap();
     });
-    Json(rx.await.unwrap())
+
+    rx.await.unwrap()
 }
 
 async fn users_impl(state: AppState, authorization: Authorization<Bearer>) -> impl IntoResponse {
@@ -108,15 +122,24 @@ async fn users(
     TypedHeader(req): TypedHeader<Authorization<Bearer>>,
 ) -> impl IntoResponse {
     let (tx, rx) = oneshot::channel();
+
     wasm_bindgen_futures::spawn_local(async move {
         let res = users_impl(state, req).await;
         tx.send(res).map_err(|_| ()).unwrap()
     });
+
     rx.await.unwrap()
 }
 
 async fn jwks(State(state): State<AppState>) -> impl IntoResponse {
-    Json(tokens::create_jwks(&state))
+    let (tx, rx) = oneshot::channel();
+
+    wasm_bindgen_futures::spawn_local(async move {
+        let jwks = get_jwks(&state).await;
+        tx.send(jwks.map(Json)).unwrap();
+    });
+
+    rx.await.unwrap()
 }
 
 fn router() -> Router<AppState, Body> {
@@ -128,18 +151,20 @@ fn router() -> Router<AppState, Body> {
 }
 
 #[event(fetch)]
-async fn fetch(req: Request<Body>, env: Env, _ctx: Context) -> Result<Response<Body>> {
+async fn fetch(req: Request<Body>, env: Env, _ctx: Context) -> worker::Result<Response<Body>> {
     console_error_panic_hook::set_once();
 
-    let env = Arc::new(env);
-    let db = Arc::new(d1::binding(&env, "DB").unwrap());
-    let kv = Arc::new(env.kv("KV").unwrap());
-
     let res = router()
-        .with_state(AppState { env, db, kv })
+        .with_state(AppState::new(env))
         .call(req)
         .await
         .unwrap();
 
     Ok(res.map(Body::new))
+}
+
+#[event(scheduled)]
+async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
+    let state = AppState::new(env);
+    rotate_keys(&state).await.expect("failed to rotate keys");
 }

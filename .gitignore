@@ -8,5 +8,3 @@ build/
 target
 wasm-target
 dist
-
-*.pem

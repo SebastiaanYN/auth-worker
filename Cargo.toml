@@ -20,6 +20,7 @@ oauth2 = { version = "4.2.3", default-features = false, features = ["reqwest"] }
 openidconnect = { version = "3.0.0-alpha.1", default-features = false } # alpha needed for WASM support
 rand = "0.8.5"
 reqwest = { version = "0.11.14", features = ["json"] }
+rsa = "0.8.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_urlencoded = "0.7.1"

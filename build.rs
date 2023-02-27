@@ -6,7 +6,6 @@ use std::{collections::HashMap, env, fs, path::Path};
 #[serde(rename_all(deserialize = "kebab-case"))]
 struct Config {
     domain: String,
-    client_id: String,
     providers: HashMap<String, Vec<String>>,
 }
 
@@ -190,7 +189,6 @@ fn main() {
         toml::from_str::<Config>(include_str!("config.toml")).expect("failed to parse config");
 
     println!("cargo:rustc-env=DOMAIN={}", config.domain);
-    println!("cargo:rustc-env=CLIENT_ID={}", config.client_id);
 
     let mut providers = providers()
         .into_iter()

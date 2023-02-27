@@ -128,8 +128,13 @@ async fn oauth_callback_impl(
     let user = exchange_user(&state, req, &flow).await?;
     let access_refresh_tokens = gen_and_store_tokens(&state, &flow, &user).await?;
 
-    let id_token =
-        tokens::id_token(user, &state, &access_refresh_tokens.access_token).map_err(Error::Jwt)?;
+    let id_token = tokens::id_token(
+        &state,
+        &flow.client_id,
+        user,
+        &access_refresh_tokens.access_token,
+    )
+    .await?;
 
     let mut reply = CoreTokenResponse::new(
         access_refresh_tokens.access_token,
