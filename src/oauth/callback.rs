@@ -128,9 +128,12 @@ async fn oauth_callback_impl(
     let user = exchange_user(&state, req, &flow).await?;
     let access_refresh_tokens = gen_and_store_tokens(&state, &flow, &user).await?;
 
+    let code = AuthorizationCode::new(gen_string(16));
+
     let id_token = tokens::id_token(
         &state,
         &flow.client_id,
+        &code,
         user,
         &access_refresh_tokens.access_token,
     )
@@ -144,8 +147,6 @@ async fn oauth_callback_impl(
     reply.set_refresh_token(Some(access_refresh_tokens.refresh_token));
     reply.set_expires_in(Some(&access_refresh_tokens.expires_in.to_std().unwrap()));
     reply.set_scopes(Some(Vec::from_iter(flow.scopes)));
-
-    let code = AuthorizationCode::new(gen_string(16));
 
     let uri = format!(
         "{}?code={}&state={}",

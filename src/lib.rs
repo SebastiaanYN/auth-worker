@@ -9,7 +9,6 @@ use axum::{
     Json, Router, TypedHeader,
 };
 use futures::channel::oneshot;
-use keys::{get_jwks, rotate_keys};
 use oauth2::Scope;
 use rand::{
     distributions::{Alphanumeric, DistString},
@@ -27,8 +26,10 @@ mod oauth;
 mod providers;
 mod tokens;
 mod users;
+mod well_known;
 
 use error::Error;
+use keys::{get_jwks, rotate_keys};
 use oauth::states::TokenMetadata;
 
 pub fn gen_string(len: usize) -> String {
@@ -146,8 +147,9 @@ fn router() -> Router<AppState, Body> {
     Router::new()
         .route("/application", post(application))
         .route("/users", get(users))
-        .route("/.well-known/jwks.json", get(jwks))
+        .route("/jwks", get(jwks))
         .nest("/oauth", oauth::router())
+        .nest("/.well-known", well_known::router())
 }
 
 #[event(fetch)]

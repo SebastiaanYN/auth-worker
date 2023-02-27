@@ -1,5 +1,5 @@
 use chrono::{Duration, Utc};
-use oauth2::{AccessToken, ClientId, RefreshToken};
+use oauth2::{AccessToken, AuthorizationCode, ClientId, RefreshToken};
 use openidconnect::{
     core::{CoreIdToken, CoreIdTokenClaims, CoreJwsSigningAlgorithm},
     Audience, EmptyAdditionalClaims, EndUserEmail, EndUserFamilyName, EndUserGivenName,
@@ -12,6 +12,7 @@ use crate::{error::Error, gen_string, keys::get_rsa_key, users::User, AppState};
 pub async fn id_token(
     state: &AppState,
     client_id: &ClientId,
+    code: &AuthorizationCode,
     user: User,
     access_token: &AccessToken,
 ) -> Result<CoreIdToken, Error> {
@@ -45,7 +46,7 @@ pub async fn id_token(
         &signing_key,
         CoreJwsSigningAlgorithm::RsaSsaPkcs1V15Sha256,
         Some(access_token),
-        None,
+        Some(code),
     )
     .map_err(Error::Jwt)?;
 

@@ -2,12 +2,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use oauth2::{
-    basic::{BasicClient, BasicErrorResponseType, BasicTokenType},
-    AuthUrl, Client, ClientId, ClientSecret, EmptyExtraTokenFields, RedirectUrl,
-    RevocationErrorResponseType, Scope, StandardErrorResponse, StandardRevocableToken,
-    StandardTokenIntrospectionResponse, StandardTokenResponse, TokenUrl,
-};
+use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, RedirectUrl, Scope, TokenUrl};
 use worker::{body::Body, Env};
 
 use crate::{
@@ -22,17 +17,8 @@ pub mod refresh;
 pub mod states;
 pub mod token;
 
-type OAuth2Client = Client<
-    StandardErrorResponse<BasicErrorResponseType>,
-    StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>,
-    BasicTokenType,
-    StandardTokenIntrospectionResponse<EmptyExtraTokenFields, BasicTokenType>,
-    StandardRevocableToken,
-    StandardErrorResponse<RevocationErrorResponseType>,
->;
-
 pub struct OAuthClient {
-    pub client: OAuth2Client,
+    pub client: BasicClient,
     pub scopes: Vec<Scope>,
 }
 
