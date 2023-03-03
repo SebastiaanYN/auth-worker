@@ -19,18 +19,20 @@ use tower::Service;
 use worker::{body::Body, event, kv::KvStore, Context, Env, ScheduleContext, ScheduledEvent};
 
 mod applications;
+mod auth;
 mod d1;
 mod error;
 mod keys;
 mod oauth;
+mod oidc;
 mod providers;
 mod tokens;
 mod users;
 mod well_known;
 
+use auth::states::TokenMetadata;
 use error::Error;
 use keys::{get_jwks, rotate_keys};
-use oauth::states::TokenMetadata;
 
 pub fn gen_string(len: usize) -> String {
     Alphanumeric.sample_string(&mut thread_rng(), len)
@@ -148,7 +150,7 @@ fn router() -> Router<AppState, Body> {
         .route("/application", post(application))
         .route("/users", get(users))
         .route("/jwks", get(jwks))
-        .nest("/oauth", oauth::router())
+        .nest("/oauth", auth::router())
         .nest("/.well-known", well_known::router())
 }
 

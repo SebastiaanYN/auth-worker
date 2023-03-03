@@ -1,3 +1,4 @@
+use oauth2::AccessToken;
 use reqwest::{header, Client};
 use serde::Deserialize;
 
@@ -23,10 +24,13 @@ struct Email {
 
 const API: &str = "https://api.github.com";
 
-pub async fn fetch_user(client: Client, access_token: &str) -> Result<User, Error> {
+pub async fn fetch_user(client: Client, access_token: &AccessToken) -> Result<User, Error> {
     let github = client
         .get(&format!("{API}/user"))
-        .header(header::AUTHORIZATION, format!("token {}", access_token))
+        .header(
+            header::AUTHORIZATION,
+            format!("token {}", access_token.secret()),
+        )
         .send()
         .await?
         .json::<GitHub>()
@@ -34,7 +38,10 @@ pub async fn fetch_user(client: Client, access_token: &str) -> Result<User, Erro
 
     let emails = client
         .get(&format!("{API}/user/emails"))
-        .header(header::AUTHORIZATION, format!("token {}", access_token))
+        .header(
+            header::AUTHORIZATION,
+            format!("token {}", access_token.secret()),
+        )
         .send()
         .await?
         .json::<Vec<Email>>()

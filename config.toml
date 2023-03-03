@@ -2,4 +2,5 @@ domain = "https://auth.cf.sebastiaanyn.me"
 
 [providers]
 discord = ["identify", "email"]
-github = ["user:email"]
+github = ["identify", "user:email"]
+google = ["openid", "profile", "email"]

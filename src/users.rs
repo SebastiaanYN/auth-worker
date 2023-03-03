@@ -1,3 +1,4 @@
+use openidconnect::core::CoreUserInfoClaims;
 use serde::{Deserialize, Serialize};
 
 mod upsert;
@@ -84,6 +85,53 @@ impl User {
             multifactor: None,
             phone_number: None,
             phone_verified: None,
+        }
+    }
+
+    pub fn from_claims(provider: &str, claims: CoreUserInfoClaims) -> Self {
+        Self {
+            id: format!("{provider}|{}", claims.subject().to_string()),
+
+            email: claims.email().map(|x| x.to_string()),
+            email_verified: claims.email_verified(),
+
+            family_name: claims
+                .family_name()
+                .and_then(|x| x.get(None))
+                .map(|x| x.to_string()),
+            given_name: claims
+                .given_name()
+                .and_then(|x| x.get(None))
+                .map(|x| x.to_string()),
+            username: claims.preferred_username().map(|x| x.to_string()),
+            name: claims
+                .name()
+                .and_then(|x| x.get(None))
+                .map(|x| x.to_string()),
+            nickname: claims
+                .nickname()
+                .and_then(|x| x.get(None))
+                .map(|x| x.to_string()),
+
+            picture: claims
+                .picture()
+                .and_then(|x| x.get(None))
+                .map(|x| x.to_string()),
+
+            created_at: None,
+            updated_at: None,
+
+            blocked: None,
+            identities: Vec::new(),
+
+            last_ip: None,
+            last_login: None,
+            last_password_reset: None,
+            logins_count: None,
+
+            multifactor: None,
+            phone_number: claims.phone_number().map(|x| x.to_string()),
+            phone_verified: claims.phone_number_verified(),
         }
     }
 }

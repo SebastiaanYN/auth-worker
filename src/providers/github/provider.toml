@@ -6,5 +6,6 @@ background-color = "#24292e"
 background-color-hover = "#2f363c"
 
 [url]
+type = "oauth2"
 auth = "https://github.com/login/oauth/authorize"
 token = "https://github.com/login/oauth/access_token"

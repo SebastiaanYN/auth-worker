@@ -6,5 +6,6 @@ background-color = "#5865f2"
 background-color-hover = "#707bf4"
 
 [url]
+type = "oauth2"
 auth = "https://discord.com/api/oauth2/authorize"
 token = "https://discord.com/api/oauth2/token"

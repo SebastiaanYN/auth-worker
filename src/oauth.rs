@@ -1,21 +1,12 @@
-use axum::{
-    routing::{get, post},
-    Router,
+use oauth2::{
+    basic::{BasicClient, BasicTokenResponse},
+    reqwest::async_http_client,
+    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge,
+    PkceCodeVerifier, RedirectUrl, Scope, TokenUrl,
 };
-use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, RedirectUrl, Scope, TokenUrl};
-use worker::{body::Body, Env};
+use reqwest::Url;
 
-use crate::{
-    error::Error,
-    providers::{self, Provider},
-    AppState,
-};
-
-pub mod authorize;
-pub mod callback;
-pub mod refresh;
-pub mod states;
-pub mod token;
+use crate::{error::Error, providers::OAuth2Provider};
 
 pub struct OAuthClient {
     pub client: BasicClient,
@@ -23,15 +14,15 @@ pub struct OAuthClient {
 }
 
 impl OAuthClient {
-    pub fn new(client_id: String, client_secret: String, provider: Provider) -> Self {
+    pub fn new(client_id: ClientId, client_secret: ClientSecret, provider: OAuth2Provider) -> Self {
         let client = BasicClient::new(
-            ClientId::new(client_id),
-            Some(ClientSecret::new(client_secret)),
+            client_id,
+            Some(client_secret),
             AuthUrl::new(provider.auth_url.into()).expect("invalid auth url"),
             Some(TokenUrl::new(provider.token_url.into()).expect("invalid token url")),
         )
         .set_redirect_uri(
-            RedirectUrl::new(provider.callback_url.into()).expect("invalid redirect url"),
+            RedirectUrl::new(format!("{}/oauth/callback", env!("DOMAIN")).into()).unwrap(),
         );
 
         Self {
@@ -43,28 +34,30 @@ impl OAuthClient {
                 .collect(),
         }
     }
-}
 
-fn get_oauth_client(name: &str, env: &Env) -> Result<OAuthClient, Error> {
-    let provider = providers::get_provider(name)?;
+    pub fn authorize_url(&self) -> (Url, CsrfToken, PkceCodeVerifier) {
+        let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
 
-    let client_id = env
-        .var(&format!("{}_CLIENT_ID", name.to_uppercase()))
-        .expect("provider client ID not set")
-        .to_string();
+        let (url, csrf) = self
+            .client
+            .authorize_url(CsrfToken::new_random)
+            .add_scopes(self.scopes.clone())
+            .set_pkce_challenge(pkce_challenge)
+            .url();
 
-    let client_secret = env
-        .var(&format!("{}_CLIENT_SECRET", name.to_uppercase()))
-        .expect("provider client secret not set")
-        .to_string();
+        (url, csrf, pkce_verifier)
+    }
 
-    Ok(OAuthClient::new(client_id, client_secret, provider))
-}
-
-pub fn router() -> Router<AppState, Body> {
-    Router::new()
-        .route("/authorize", get(authorize::oauth_authorize))
-        .route("/callback", get(callback::oauth_callback))
-        .route("/token", post(token::oauth_token))
-        .route("/refresh", post(refresh::oauth_refresh))
+    pub async fn exchange_code(
+        &self,
+        code: AuthorizationCode,
+        pkce_verifier: PkceCodeVerifier,
+    ) -> Result<BasicTokenResponse, Error> {
+        self.client
+            .exchange_code(code)
+            .set_pkce_verifier(pkce_verifier)
+            .request_async(async_http_client)
+            .await
+            .map_err(Error::TokenExchangeError)
+    }
 }

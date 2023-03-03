@@ -1,0 +1,10 @@
+name = "google"
+
+[style]
+display-name = "Google"
+background-color = "#4c8bf5"
+background-color-hover = "#0f64f2"
+
+[url]
+type = "oidc"
+issuer = "https://accounts.google.com"

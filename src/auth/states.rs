@@ -1,13 +1,21 @@
 use std::collections::HashSet;
 
-use oauth2::{AccessToken, ClientId, CsrfToken, RefreshToken, Scope};
-use openidconnect::core::CoreTokenResponse;
+use oauth2::{AccessToken, ClientId, CsrfToken, PkceCodeVerifier, RefreshToken, Scope};
+use openidconnect::{core::CoreTokenResponse, Nonce};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
+pub enum AuthorizeFlowStateType {
+    OAuth2,
+    Oidc { nonce: Nonce },
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct AuthorizeFlowState {
+    pub ty: AuthorizeFlowStateType,
     pub connection: String,
     pub state: CsrfToken,
+    pub pkce_verifier: PkceCodeVerifier,
     pub scopes: HashSet<Scope>,
     pub client_id: ClientId,
     pub redirect_uri: String,

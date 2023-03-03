@@ -9,9 +9,13 @@ use futures::channel::oneshot;
 use oauth2::{basic::BasicErrorResponseType, ClientId, CsrfToken, ResponseType, Scope};
 use serde::{Deserialize, Serialize};
 
-use crate::{applications, error::Error, AppState};
+use crate::{applications::get_scopes, error::Error, AppState};
 
-use super::{get_oauth_client, states::AuthorizeFlowState};
+use super::{
+    get_auth_client,
+    states::{AuthorizeFlowState, AuthorizeFlowStateType},
+    AuthClient,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AuthorizeRequest {
@@ -34,7 +38,7 @@ async fn oauth_authorize_impl(state: AppState, req: AuthorizeRequest) -> impl In
     // There is an early return when connection is not set
     let connection = req.connection.unwrap();
 
-    let oauth = get_oauth_client(&connection, &state.env)?;
+    let auth_client = get_auth_client(&connection, &state.env).await?;
 
     let requested_scopes = req
         .scope
@@ -46,7 +50,7 @@ async fn oauth_authorize_impl(state: AppState, req: AuthorizeRequest) -> impl In
         })
         .unwrap_or_default();
 
-    let allowed_scopes = applications::get_scopes(&state.db, &req.client_id)
+    let allowed_scopes = get_scopes(&state.db, &req.client_id)
         .await
         .ok_or(Error::OAuth2(
             BasicErrorResponseType::InvalidClient,
@@ -60,20 +64,27 @@ async fn oauth_authorize_impl(state: AppState, req: AuthorizeRequest) -> impl In
         ));
     }
 
-    let (auth_url, csrf_token) = oauth
-        .client
-        .authorize_url(CsrfToken::new_random)
-        .add_scope(Scope::new("identify".to_string()))
-        .add_scopes(oauth.scopes)
-        .url();
+    let ((auth_url, csrf_token, pkce_verifier), ty) = match auth_client {
+        AuthClient::OAuth2(client) => (client.authorize_url(), AuthorizeFlowStateType::OAuth2),
+        AuthClient::Oidc(client) => {
+            let (auth_url, csrf_token, nonce, pkce_verifier) = client.authorize_url();
+
+            (
+                (auth_url, csrf_token, pkce_verifier),
+                AuthorizeFlowStateType::Oidc { nonce },
+            )
+        }
+    };
 
     state
         .kv
         .put(
             &format!("state:{}", csrf_token.secret()),
             AuthorizeFlowState {
+                ty,
                 connection,
                 state: req.state,
+                pkce_verifier,
                 scopes: requested_scopes,
                 client_id: req.client_id,
                 redirect_uri: req.redirect_uri,

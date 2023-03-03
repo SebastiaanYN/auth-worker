@@ -30,9 +30,16 @@ struct StyleConfig {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all(deserialize = "kebab-case"))]
-struct UrlConfig {
-    auth: String,
-    token: String,
+#[serde(tag = "type")]
+enum UrlConfig {
+    #[serde(rename = "oauth2")]
+    OAuth2 {
+        auth: String,
+        token: String,
+    },
+    Oidc {
+        issuer: String,
+    },
 }
 
 fn out_dir() -> String {
@@ -58,9 +65,7 @@ fn providers() -> Vec<ProviderConfig> {
 }
 
 fn gen_provider_def(config: &Config, provider: &ProviderConfig) -> String {
-    let Config { domain, .. } = config;
     let ProviderConfig { name, url, .. } = provider;
-    let UrlConfig { auth, token } = url;
 
     let name_upper = name.to_uppercase();
 
@@ -73,16 +78,25 @@ fn gen_provider_def(config: &Config, provider: &ProviderConfig) -> String {
         .collect::<Vec<String>>()
         .join(",");
 
-    format!(
-        r#"
-const {name_upper}: Provider = Provider {{
+    match url {
+        UrlConfig::OAuth2 { auth, token } => format!(
+            r#"
+const {name_upper}: Provider = Provider::OAuth2(OAuth2Provider {{
     auth_url: "{auth}",
     token_url: "{token}",
-    callback_url: "{domain}/oauth/callback",
     scopes: &[{scopes}],
-}};
-        "#
-    )
+}});
+            "#
+        ),
+        UrlConfig::Oidc { issuer } => format!(
+            r#"
+const {name_upper}: Provider = Provider::Oidc(OidcProvider {{
+    issuer_url: "{issuer}",
+    scopes: &[{scopes}],
+}});
+            "#
+        ),
+    }
 }
 
 fn gen_provider_fns(providers: &[ProviderConfig]) -> String {
@@ -101,7 +115,12 @@ fn gen_provider_fns(providers: &[ProviderConfig]) -> String {
         .map(|provider| {
             let ProviderConfig { name, .. } = provider;
 
-            format!(r#""{name}" => {name}::fetch_user(client, access_token).await,"#)
+            match provider.url {
+                UrlConfig::OAuth2 { .. } => {
+                    format!(r#""{name}" => {name}::fetch_user(client, access_token).await,"#)
+                }
+                UrlConfig::Oidc { .. } => format!(r#""{name}" => unreachable!(),"#),
+            }
         })
         .collect::<String>();
 
@@ -114,7 +133,7 @@ pub fn get_provider(provider: &str) -> Result<Provider, Error> {{
     }}
 }}
 
-pub async fn fetch_user(provider: &str, client: ::reqwest::Client, access_token: &str) -> Result<User, Error> {{
+pub async fn fetch_user(provider: &str, client: Client, access_token: &AccessToken) -> Result<User, Error> {{
     let mut user = match provider {{
         {fetch_match_arms}
         _ => Err(Error::InvalidConnection),

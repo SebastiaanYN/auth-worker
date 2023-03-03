@@ -1,3 +1,4 @@
+use oauth2::AccessToken;
 use reqwest::Client;
 use serde::Deserialize;
 
@@ -12,10 +13,10 @@ struct Discord {
     email: Option<String>,
 }
 
-pub async fn fetch_user(client: Client, access_token: &str) -> Result<User, Error> {
+pub async fn fetch_user(client: Client, access_token: &AccessToken) -> Result<User, Error> {
     let discord = client
         .get("https://discord.com/api/users/@me")
-        .bearer_auth(access_token)
+        .bearer_auth(access_token.secret())
         .send()
         .await?
         .json::<Discord>()
